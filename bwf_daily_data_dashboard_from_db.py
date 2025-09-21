@@ -87,7 +87,19 @@ def get_total_ooo_rooms_at_2100(db_path, table_name, start_date, end_date):
 
 st.set_page_config(layout="wide", page_title="Hotel Performance Dashboard")
 
-st.title("Hotel Performance Overview 🏨")
+st.markdown("""
+<style>
+.center { display: flex; justify-content: center; text-align: center; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h2 class='center' style='color:rgb(70, 130, 255);'>An EsteStyle Streamlit Page<br>Where Python Wiz Meets Data Biz!</h2>", unsafe_allow_html=True)
+st.markdown("<img src='https://1drv.ms/i/s!ArWyPNkF5S-foZspwsary83MhqEWiA?embed=1&width=307&height=307' width='300' style='display: block; margin: 0 auto;'>", unsafe_allow_html=True)
+st.markdown("<h3 class='center' style='color: rgb(135, 206, 250);'>🏨 Originally created for Best Western at Firestone 🛎️</h3>", unsafe_allow_html=True)
+st.markdown("<h3 class='center' style='color: rgb(135, 206, 250);'>🤖 By Esteban C Loetz 📟</h3>", unsafe_allow_html=True)
+st.markdown("##")
+st.markdown("---")
+st.markdown("<h3 class='center' style='color: rgb(112, 128, 140);'>📄 Hotel Performance Overview 🖋️</h3>", unsafe_allow_html=True)
 
 # Sidebar widgets
 graph_type = st.sidebar.selectbox("Select Graph Type", ["Line", "Bar"])
