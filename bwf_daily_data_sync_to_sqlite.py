@@ -35,10 +35,17 @@ def sync_google_sheet_to_sqlite():
         print(f"Error combining Date and Time columns: {e}")
         return
 
-    # Define columns that should be numerical
-    numerical_cols = ['Rooms Sold', 'Rooms Available', 'Arrivals', 'OOO Rooms', 'King Rate', 'QQ Rate']
+    # Only convert truly numeric columns
+    numeric_cols = ['Rooms Sold', 'Rooms Available', 'Arrivals', 'OOO Rooms']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            print(f"Converted '{col}' to numeric and filled NaNs.")
+        else:
+            print(f"Warning: Column '{col}' not found in Google Sheet. Skipping conversion.")
 
-    for col in numerical_cols:
+
+    for col in numeric_cols:
         if col in df.columns:
             # Use pd.to_numeric with errors='coerce' to turn non-numeric values (like 'sold out') into NaN
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -70,6 +77,9 @@ def sync_google_sheet_to_sqlite():
         conn.close()
         print(f"Successfully synced data to {DB_FILE_NAME}, table '{TABLE_NAME}'.")
         print(f"Final row count in DB: {len(df_cleaned)}")
+        print("Sample King Rate values:", df['King Rate'].unique()[:10])
+        print("Sample QQ Rate values:", df['QQ Rate'].unique()[:10])
+
 
     except Exception as e:
         print(f"Error writing to SQLite database: {e}")

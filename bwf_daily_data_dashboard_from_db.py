@@ -19,20 +19,21 @@ def load_all_data(db_path, table_name):
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
         conn.close()
 
-        # Ensure DateTime is correctly parsed (it might be string from DB)
+        # Ensure DateTime is correctly parsed
         df['DateTime'] = pd.to_datetime(df['DateTime'])
 
-        # Ensure numerical columns are truly numeric (fillna(0) handles 'sold out' converted to NaN)
-        numerical_cols = ['Rooms Sold', 'Rooms Available', 'Arrivals', 'OOO Rooms', 'King Rate', 'QQ Rate']
-        for col in numerical_cols:
+        # Clean truly numeric columns only
+        numeric_cols = ['Rooms Sold', 'Rooms Available', 'Arrivals', 'OOO Rooms']
+        for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
         return df
     except Exception as e:
         st.error(f"Error loading data from database: {e}")
         st.info(f"Please ensure '{DB_FILE_NAME}' exists in the same directory as this app, and run the sync script.")
-        return pd.DataFrame() # Return empty DataFrame on error
+        return pd.DataFrame()
 
+    
 # --- Function to get Overall Occupancy Rate using SQL ---
 @st.cache_data
 def get_overall_occupancy_rate(db_path, table_name, max_capacity, start_date, end_date):
@@ -99,13 +100,13 @@ st.markdown("<h3 class='center' style='color: rgb(135, 206, 250);'>🏨 Original
 st.markdown("<h3 class='center' style='color: rgb(135, 206, 250);'>🤖 By Esteban C Loetz 📟</h3>", unsafe_allow_html=True)
 st.markdown("##")
 st.markdown("---")
-st.markdown("<h3 class='center' style='color: rgb(112, 128, 140);'>📄 Hotel Performance Overview 🖋️</h3>", unsafe_allow_html=True)
 
 # Sidebar widgets
 graph_type = st.sidebar.selectbox("Select Graph Type", ["Line", "Bar"])
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
+
 time_scale = st.sidebar.selectbox("Select Time Scale", ["Month", "Week", "Day"])
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
@@ -138,11 +139,12 @@ else:
     start_date, end_date = date_range[0], date_range[0]
     
 # Filter the DataFrame based on the user's selection
-filtered_data = all_data[(all_data['DateTime'].dt.date >= start_date) & (all_data['DateTime'].dt.date <= end_date)]
-
+filtered_data = all_data[
+    (all_data['DateTime'].dt.date >= start_date) &
+    (all_data['DateTime'].dt.date <= end_date)
+].copy()
 
 if not filtered_data.empty:
-
     # Map time_scale to resample frequency
     freq_map = {
         "Day": "D",
@@ -153,7 +155,10 @@ if not filtered_data.empty:
 
     # Resample and format
     def resample_data(df, freq):
-        return df.resample(freq).mean()
+        # Only resample numeric columns
+        numeric_df = df.select_dtypes(include='number')
+        return numeric_df.resample(freq).mean()
+
 
     def format_labels(df, time_scale):
         if time_scale == "Day":
@@ -164,100 +169,124 @@ if not filtered_data.empty:
             df['Label'] = df.index.strftime('%B')
         return df
 
+    def plot_metric_chart(df, metric_col, hour, title, y_title, graph_type, time_scale):
+        df_base = df[df['DateTime'].dt.hour == hour].set_index('DateTime')
+        if df_base.empty:
+            st.info(f"No {title.lower()} data for the selected date range.")
+            return
 
-    def plot_chart(df, graph_type):
-        if graph_type == "Bar":
-            chart = alt.Chart(df).mark_bar().encode(
-                x=alt.X('Label:N', title='Date'),
-                y=alt.Y('OOO Rooms', title='Out-of-Order Rooms'),
-                tooltip=['Label', 'OOO Rooms']
-            )
-        else:
-            chart = alt.Chart(df).mark_line().encode(
-                x=alt.X('Label:N', title='Date'),
-                y=alt.Y('OOO Rooms', title='Out-of-Order Rooms'),
-                tooltip=['Label', 'OOO Rooms']
-            )
-        return chart.properties(width=800, height=400)
-
-
-    st.subheader("OOO Rooms Trend")
-
-    # Filter to 9 PM data
-    ooo_data_base = filtered_data[filtered_data['DateTime'].dt.hour == 21].set_index('DateTime')
-
-    if not ooo_data_base.empty:
-        resampled = resample_data(ooo_data_base, resample_freq)
+        resampled = resample_data(df_base, freq_map[time_scale])
         labeled = format_labels(resampled, time_scale)
-        chart = plot_chart(labeled, graph_type)
+        labeled[metric_col] = labeled[metric_col].round(1)
+
+        chart = alt.Chart(labeled).mark_line() if graph_type == "Line" else alt.Chart(labeled).mark_bar()
+        chart = chart.encode(
+            x=alt.X('Label:N', title='Date'),
+            y=alt.Y(f'{metric_col}:Q', title=y_title),
+            tooltip=['Label', metric_col]
+        ).properties(width=800, height=400)
+
+        st.subheader(title)
         st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("No OOO Rooms data available for the selected date range.")
 
-    '''
-    # --- Daily Occupancy Rate Chart ---
-    st.subheader(f"Daily Occupancy Rate Trend by {time_scale}")
-    # Calculate occupancy rate per day: (Rooms Sold at 21:00 / MAX_HOTEL_CAPACITY) * 100
-        
-    if not occ_data_base.empty:
-        occ_data_base['Occupancy Rate'] = occ_data_base['Rooms Sold'] * 100.0 / MAX_HOTEL_CAPACITY
-        if time_scale == "Month":
-            occ_chart_data = occ_data_base['Occupancy Rate'].resample('ME').mean()
-        elif time_scale == "Week":
-            occ_chart_data = occ_data_base['Occupancy Rate'].resample('W').mean()
-        else:
-            occ_chart_data = occ_data_base['Occupancy Rate'].resample('D').mean()
-        if graph_type == "Line":
-            st.line_chart(occ_chart_data, use_container_width=True)
-        elif graph_type == "Bar":
-            st.bar_chart(occ_chart_data, use_container_width=True)
-    else:
-        st.info("No occupancy rate data for the selected date range.")
-
-    # --- Daily Arrivals at 3 PM Chart ---
-    st.subheader(f"Daily Arrivals at 3 PM Trend by {time_scale}")
-    
-    if not arrivals_3pm_base.empty:
-        if time_scale == "Month":
-            arrivals_chart_data = arrivals_3pm_base['Arrivals'].resample('ME').mean()
-        elif time_scale == "Week":
-            arrivals_chart_data = arrivals_3pm_base['Arrivals'].resample('W').mean()
-        else:
-            arrivals_chart_data = arrivals_3pm_base['Arrivals'].resample('D').mean()
-        if graph_type == "Line":
-            st.line_chart(arrivals_chart_data, use_container_width=True)
-        elif graph_type == "Bar":
-            st.bar_chart(arrivals_chart_data, use_container_width=True)
-    else:
-        st.info("No arrivals at 3 PM data for the selected date range.")'''
     # --- Calculate Metrics on the FILTERED Data ---
     occupancy_rate = get_overall_occupancy_rate(DB_FILE_NAME, TABLE_NAME, MAX_HOTEL_CAPACITY, start_date, end_date)
-    avg_king_rate = filtered_data['King Rate'].mean()
-    avg_qq_rate = filtered_data['QQ Rate'].mean()
+
+    # Clean King and QQ rates before averaging
+    filtered_data['King Rate Clean'] = pd.to_numeric(filtered_data['King Rate'], errors='coerce')
+    filtered_data['QQ Rate Clean'] = pd.to_numeric(filtered_data['QQ Rate'], errors='coerce')
+
+    avg_king_rate = filtered_data['King Rate Clean'].dropna().mean()
+    avg_qq_rate = filtered_data['QQ Rate Clean'].dropna().mean()
+
+    nine_pm_data = filtered_data[filtered_data['DateTime'].dt.hour == 21]
+
+    num_king_sold_out = nine_pm_data['King Rate'].astype(str).str.lower().str.contains('sold out', na=False).sum()
+    num_qq_sold_out = nine_pm_data['QQ Rate'].astype(str).str.lower().str.contains('sold out', na=False).sum()
+
+    # Arrivals at 3 PM
     arrivals_3pm_data = filtered_data[filtered_data['DateTime'].dt.hour == 15]['Arrivals']
     avg_arrivals_3pm = arrivals_3pm_data.mean() if not arrivals_3pm_data.empty else 0
+
+    # Total OOO Rooms and total days
     total_ooo_rooms = get_total_ooo_rooms_at_2100(DB_FILE_NAME, TABLE_NAME, start_date, end_date)
     total_days_in_db = filtered_data['DateTime'].dt.date.nunique()
 
+    nine_pm_data = filtered_data[filtered_data['DateTime'].dt.hour == 21]
+    ooo_days = nine_pm_data[nine_pm_data['OOO Rooms'] > 0]['DateTime'].dt.date.nunique()
+    ooo_day_percent = (ooo_days / total_days_in_db) * 100 if total_days_in_db > 0 else 0
+
     # --- Display Metrics using st.metric ---
-    st.header("Overall Key Performance Indicators")
+    st.markdown("<h2 style='color:rgb(70, 130, 255); text-align:center;'>Key Performance Indicators for Selected Date</h2>", unsafe_allow_html=True)
 
-    col1, col2, col3, col4, col5 = st.columns(5) 
+    col1, col2, col3, col4 = st.columns(4) 
 
-    with col1:
-        st.metric(label=f"Avg. Daily Occupancy\n@ 9 PM", value=f"{occupancy_rate:.1f}%")
+    st.subheader("📊 Occupancy & Arrivals")
+    col1, col2, col3, col4 = st.columns(4) 
     with col2:
-        st.metric(label="Avg. Daily Arrivals\n@ 3 PM", value=f"{avg_arrivals_3pm:.1f}")
+        st.metric("📈 Avg. Daily Occupancy @ 9 PM", f"{occupancy_rate:.1f}%")
     with col3:
-        st.metric(label=f"Total OOO Rooms \n@ 9 PM (out of {total_days_in_db} days)", value=f"{int(total_ooo_rooms)}")
+        st.metric("🚪 Avg. Daily Arrivals @ 3 PM", f"{avg_arrivals_3pm:.1f}")
+
+    st.subheader("💸 Rate Performance")
+    col3, col4 = st.columns(2)
+    with col3:
+        st.metric("💰 Avg. King Rate", f"${avg_king_rate:.2f}")
     with col4:
-        st.metric(label="Avg. King Rate", value=f"${avg_king_rate:.2f}")
+        st.metric("💵 Avg. QQ Rate", f"${avg_qq_rate:.2f}")
+
+    st.subheader("🔥 Sold Out Pressure")
+    col5, col6 = st.columns(2)
     with col5:
-        st.metric(label="Avg. QQ Rate", value=f"${avg_qq_rate:.2f}")
+        st.metric("👑 King Sold Out Days", num_king_sold_out)
+    with col6:
+        st.metric("🛏️ QQ Sold Out Days", num_qq_sold_out)
+
+    st.subheader("🛠️ Maintenance Impact")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label=f"🔧 Total OOO Rooms\n(out of {total_days_in_db} days)", value=f"{int(total_ooo_rooms)}")
+    with col2:
+        st.metric(label="📉 % Days with OOO Rooms @ 9 PM", value=f"{ooo_day_percent:.1f}%")
+
+    st.markdown("---")
+
+    # --- Occupancy Rate Chart ---
+    filtered_data['Occupancy Rate'] = filtered_data['Rooms Sold'] * 100.0 / MAX_HOTEL_CAPACITY
+    plot_metric_chart(
+        filtered_data,
+        metric_col='Occupancy Rate',
+        hour=21,
+        title=f"Daily Occupancy Rate Trend by {time_scale}",
+        y_title="Occupancy Rate (%)",
+        graph_type=graph_type,
+        time_scale=time_scale
+    )
+    # --- Arrivals Rate Chart ---
+    plot_metric_chart(
+        filtered_data,
+        metric_col='Arrivals',
+        hour=15,
+        title=f"Daily Arrivals at 3 PM Trend by {time_scale}",
+        y_title="Arrivals at 3 PM",
+        graph_type=graph_type,
+        time_scale=time_scale
+    )
+
+    # --- Out Of Order Rate Chart ---
+    plot_metric_chart(
+        filtered_data,
+        metric_col='OOO Rooms',
+        hour=21,
+        title=f"OOO Rooms Trend at 9 PM Trend by {time_scale}",
+        y_title="Out-of-Order Rooms",
+        graph_type=graph_type,
+        time_scale=time_scale
+    )
 
     st.markdown("---") 
 
-    st.subheader("Raw Data Preview")
+    st.subheader("Filtered by Date Data Preview")
     st.dataframe(all_data.tail(6)) 
 
 else:
