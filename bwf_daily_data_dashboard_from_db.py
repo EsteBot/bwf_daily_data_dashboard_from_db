@@ -27,6 +27,8 @@ def load_all_data(db_path, table_name):
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+        #print(len(df))
+
         return df
     except Exception as e:
         st.error(f"Error loading data from database: {e}")
@@ -102,7 +104,7 @@ st.markdown("##")
 st.markdown("---")
 
 # Sidebar widgets
-graph_type = st.sidebar.selectbox("Select Graph Type", ["Line", "Bar"])
+graph_type = st.sidebar.selectbox("Select Graph Type", ["Bar", "Line"])
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
@@ -178,15 +180,82 @@ if not filtered_data.empty:
         resampled = resample_data(df_base, freq_map[time_scale])
         labeled = format_labels(resampled, time_scale)
         labeled[metric_col] = labeled[metric_col].round(1)
-
+        month_order = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
         chart = alt.Chart(labeled).mark_line() if graph_type == "Line" else alt.Chart(labeled).mark_bar()
         chart = chart.encode(
-            x=alt.X('Label:N', title='Date'),
+            x=alt.X('Label:N', sort=month_order, title=None),
             y=alt.Y(f'{metric_col}:Q', title=y_title),
             tooltip=['Label', metric_col]
         ).properties(width=800, height=400)
 
-        st.subheader(title)
+        st.markdown(f"<h3 style='color:rgb(70, 130, 255); text-align:center;'>{title}</h3>", unsafe_allow_html=True)
+        st.altair_chart(chart, use_container_width=True)
+
+    def calc_avg_change(df, col):
+        return round(df[col].diff().abs().mean(), 1)
+        
+
+    def plot_multi_metric_chart(df, metric_cols, hour, title, y_title, graph_type, time_scale):
+        df_base = df[df['DateTime'].dt.hour == hour].set_index('DateTime')
+        if df_base.empty:
+            st.info(f"No {title.lower()} data for the selected date range.")
+            return
+
+        resampled = resample_data(df_base, freq_map[time_scale])
+        labeled = format_labels(resampled, time_scale)
+
+        for col in metric_cols:
+            labeled[col] = labeled[col].round(1)
+
+        # Reshape for grouped bar chart
+        melted = labeled.melt(
+            id_vars='Label',
+            value_vars=metric_cols,
+            var_name='Rate Type',
+            value_name='Rate'
+        )
+
+        if graph_type == "Bar":
+            chart = alt.Chart(melted).mark_bar().encode(
+                x=alt.X('Label:N', title=None),
+                xOffset='Rate Type:N',
+                y=alt.Y('Rate:Q', title=y_title),
+                color=alt.Color(
+                'Rate Type:N',
+                scale=alt.Scale(
+                    domain=['King Rate Clean', 'QQ Rate Clean'],
+                    range=['rgb(70, 130, 255)', 'rgb(135, 206, 250)']
+                ),
+                legend=alt.Legend(
+                    title="Rate Type",
+                    labelExpr="replace(datum.label, ' Rate Clean', '')"
+                )
+            )
+            ,
+                tooltip=['Label', 'Rate Type', 'Rate']
+            ).properties(width=800, height=400)
+
+        elif graph_type == "Line":
+            base = alt.Chart(labeled).encode(
+                x=alt.X('Label:N', title=None),
+                tooltip=['Label'] + metric_cols
+            )
+
+            color_map = {
+                'King Rate Clean': 'rgb(70, 130, 255)',
+                'QQ Rate Clean': 'rgb(135, 206, 250)'
+            }
+
+            layers = []
+            for col in metric_cols:
+                mark = base.mark_line(color=color_map.get(col, 'gray'))
+                chart_line = mark.encode(y=alt.Y(f'{col}:Q', title=y_title), opacity=alt.value(0.7))
+                layers.append(chart_line)
+
+            chart = alt.layer(*layers).properties(width=800, height=400)
+
+        st.markdown(f"<h3 style='color:rgb(70, 130, 255); text-align:center;'>{title}</h3>", unsafe_allow_html=True)
         st.altair_chart(chart, use_container_width=True)
 
     # --- Calculate Metrics on the FILTERED Data ---
@@ -212,42 +281,49 @@ if not filtered_data.empty:
     total_ooo_rooms = get_total_ooo_rooms_at_2100(DB_FILE_NAME, TABLE_NAME, start_date, end_date)
     total_days_in_db = filtered_data['DateTime'].dt.date.nunique()
 
-    nine_pm_data = filtered_data[filtered_data['DateTime'].dt.hour == 21]
     ooo_days = nine_pm_data[nine_pm_data['OOO Rooms'] > 0]['DateTime'].dt.date.nunique()
     ooo_day_percent = (ooo_days / total_days_in_db) * 100 if total_days_in_db > 0 else 0
 
+    king_sold_out_percent = (num_king_sold_out / total_days_in_db) * 100 if total_days_in_db > 0 else 0
+    qq_sold_out_percent = (num_qq_sold_out / total_days_in_db) * 100 if total_days_in_db > 0 else 0
+
     # --- Display Metrics using st.metric ---
-    st.markdown("<h2 style='color:rgb(70, 130, 255); text-align:center;'>Key Performance Indicators for Selected Date</h2>", unsafe_allow_html=True)
-
-    col1, col2, col3, col4 = st.columns(4) 
-
-    st.subheader("📊 Occupancy & Arrivals")
+    date_range_str = f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
+    st.markdown(f"<h2 style='color:rgb(70, 130, 255); text-align:center;'>Key Performance Indicators<br>for {total_days_in_db} Days<br>{date_range_str}<br></h2>", unsafe_allow_html=True)
+    st.write("")
+    st.markdown("<h4 style='color:rgb(135, 206, 250); text-align:center;'>Occupancy & Arrivals</h4>", unsafe_allow_html=True)
+    st.write("")
     col1, col2, col3, col4 = st.columns(4) 
     with col2:
-        st.metric("📈 Avg. Daily Occupancy @ 9 PM", f"{occupancy_rate:.1f}%")
+        st.metric("🚪 Avg. Daily Occupancy @ 9 PM", f"{occupancy_rate:.1f}%")
     with col3:
         st.metric("🚪 Avg. Daily Arrivals @ 3 PM", f"{avg_arrivals_3pm:.1f}")
 
-    st.subheader("💸 Rate Performance")
-    col3, col4 = st.columns(2)
-    with col3:
-        st.metric("💰 Avg. King Rate", f"${avg_king_rate:.2f}")
-    with col4:
-        st.metric("💵 Avg. QQ Rate", f"${avg_qq_rate:.2f}")
-
-    st.subheader("🔥 Sold Out Pressure")
-    col5, col6 = st.columns(2)
-    with col5:
-        st.metric("👑 King Sold Out Days", num_king_sold_out)
-    with col6:
-        st.metric("🛏️ QQ Sold Out Days", num_qq_sold_out)
-
-    st.subheader("🛠️ Maintenance Impact")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label=f"🔧 Total OOO Rooms\n(out of {total_days_in_db} days)", value=f"{int(total_ooo_rooms)}")
+    st.markdown("<h4 style='color:rgb(135, 206, 250); text-align:center;'>Rate Performance</h4>", unsafe_allow_html=True)
+    st.write("")
+    col1, col2, col3, col4 = st.columns(4)
     with col2:
-        st.metric(label="📉 % Days with OOO Rooms @ 9 PM", value=f"{ooo_day_percent:.1f}%")
+        st.metric("💳 Avg. King Rate", f"${avg_king_rate:.2f}")
+    with col3:
+        st.metric("💳 Avg. QQ Rate", f"${avg_qq_rate:.2f}")
+    st.write("")
+
+    st.markdown("<h4 style='color:rgb(135, 206, 250); text-align:center;'>Sold Out Pressure</h4>", unsafe_allow_html=True)
+    st.write("")
+    col1, col2, col3, col4 = st.columns(4)
+    with col2:
+        st.metric("🛏️ King Sold Out Days", num_king_sold_out, delta=f"{king_sold_out_percent:.1f}% of days")
+    with col3:
+        st.metric("🛏️ QQ Sold Out Days", num_qq_sold_out, delta=f"{qq_sold_out_percent:.1f}% of days")
+    st.write("")
+
+    st.markdown("<h4 style='color:rgb(135, 206, 250); text-align:center;'>Maintenance Impact</h4>", unsafe_allow_html=True)
+    st.write("")
+    col1, col2, col3, col4 = st.columns(4)
+    with col2:
+        st.metric(label=f"🔧 Total OOO Rooms", value=f"{int(total_ooo_rooms)}")
+    with col3:
+        st.metric(label="🔧 % Days with OOO Rooms", value=f"{ooo_day_percent:.1f}%")
 
     st.markdown("---")
 
@@ -257,7 +333,7 @@ if not filtered_data.empty:
         filtered_data,
         metric_col='Occupancy Rate',
         hour=21,
-        title=f"Daily Occupancy Rate Trend by {time_scale}",
+        title=f"Daily Occupancy Rate at 9 PM Trend by {time_scale}",
         y_title="Occupancy Rate (%)",
         graph_type=graph_type,
         time_scale=time_scale
@@ -268,7 +344,7 @@ if not filtered_data.empty:
         metric_col='Arrivals',
         hour=15,
         title=f"Daily Arrivals at 3 PM Trend by {time_scale}",
-        y_title="Arrivals at 3 PM",
+        y_title="Arrivals (3 PM)",
         graph_type=graph_type,
         time_scale=time_scale
     )
@@ -278,16 +354,45 @@ if not filtered_data.empty:
         filtered_data,
         metric_col='OOO Rooms',
         hour=21,
-        title=f"OOO Rooms Trend at 9 PM Trend by {time_scale}",
-        y_title="Out-of-Order Rooms",
+        title=f"Daily OOO Rooms at 9 PM Trend by {time_scale}",
+        y_title="Out-of-Order Rooms (Avg)",
+        graph_type=graph_type,
+        time_scale=time_scale
+    )
+
+    plot_multi_metric_chart(
+        filtered_data,
+        metric_cols=['King Rate Clean', 'QQ Rate Clean'],
+        hour=21,
+        title=f"Rate Trend at 9 PM by {time_scale}",
+        y_title="Rate ($)",
         graph_type=graph_type,
         time_scale=time_scale
     )
 
     st.markdown("---") 
 
-    st.subheader("Filtered by Date Data Preview")
-    st.dataframe(all_data.tail(6)) 
+    filtered_display = filtered_data.drop(columns=["King Rate Clean", "QQ Rate Clean"], errors="ignore")
+    
+    st.markdown("<h3 style='text-align:center; color:rgb(70, 130, 255);'>📂 Filtered Data Access</h3>", unsafe_allow_html=True)
+
+    with st.expander("🔍 Inspect Filtered Data"):
+        st.dataframe(filtered_display)
+
+        csv = filtered_display.to_csv(index=False).encode('utf-8')
+
+        st.markdown(
+            "<div style='text-align:center;'>",
+            unsafe_allow_html=True
+        )
+    st.download_button(
+        label="📥 Download Filtered by Date Data as CSV",
+        data=csv,
+        file_name="filtered_data.csv",
+        mime="text/csv"
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 else:
     st.warning("No data loaded. Please check your database file and sync script.")

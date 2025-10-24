@@ -77,9 +77,6 @@ def sync_google_sheet_to_sqlite():
         conn.close()
         print(f"Successfully synced data to {DB_FILE_NAME}, table '{TABLE_NAME}'.")
         print(f"Final row count in DB: {len(df_cleaned)}")
-        print("Sample King Rate values:", df['King Rate'].unique()[:10])
-        print("Sample QQ Rate values:", df['QQ Rate'].unique()[:10])
-
 
     except Exception as e:
         print(f"Error writing to SQLite database: {e}")
