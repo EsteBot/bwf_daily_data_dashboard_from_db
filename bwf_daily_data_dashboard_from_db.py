@@ -28,8 +28,9 @@ def load_all_data(db_path, table_name):
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
         #print(len(df))
-
+        
         return df
+    
     except Exception as e:
         st.error(f"Error loading data from database: {e}")
         st.info(f"Please ensure '{DB_FILE_NAME}' exists in the same directory as this app, and run the sync script.")
@@ -217,8 +218,10 @@ if not filtered_data.empty:
         )
 
         if graph_type == "Bar":
+            month_order = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
             chart = alt.Chart(melted).mark_bar().encode(
-                x=alt.X('Label:N', title=None),
+                x=alt.X('Label:N', sort=month_order, title=None),
                 xOffset='Rate Type:N',
                 y=alt.Y('Rate:Q', title=y_title),
                 color=alt.Color(
@@ -238,7 +241,7 @@ if not filtered_data.empty:
 
         elif graph_type == "Line":
             base = alt.Chart(labeled).encode(
-                x=alt.X('Label:N', title=None),
+                x=alt.X('Label:N', sort=month_order, title=None),
                 tooltip=['Label'] + metric_cols
             )
 

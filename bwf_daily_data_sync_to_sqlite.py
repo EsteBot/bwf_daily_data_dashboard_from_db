@@ -1,11 +1,10 @@
 import pandas as pd
 import sqlite3
+import os
 
 # --- Configuration ---
 GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-UtS5s5vPLOFUv0DKdhhmx6nFYne96d4uothRkTrP3nxvhDFDpHM9zCRIYmyXwBo1uf4QE-oX6FkN/pub?output=csv"
-
 DB_FILE_NAME = "hotel_data.db"
-
 TABLE_NAME = "daily_hourly_metrics"
 
 # --- Main Sync Function ---
@@ -77,6 +76,7 @@ def sync_google_sheet_to_sqlite():
         conn.close()
         print(f"Successfully synced data to {DB_FILE_NAME}, table '{TABLE_NAME}'.")
         print(f"Final row count in DB: {len(df_cleaned)}")
+        print("DB path:", os.path.abspath(DB_FILE_NAME))
 
     except Exception as e:
         print(f"Error writing to SQLite database: {e}")
