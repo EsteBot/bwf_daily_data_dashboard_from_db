@@ -240,6 +240,8 @@ if not filtered_data.empty:
             ).properties(width=800, height=400)
 
         elif graph_type == "Line":
+            month_order = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
             base = alt.Chart(labeled).encode(
                 x=alt.X('Label:N', sort=month_order, title=None),
                 tooltip=['Label'] + metric_cols
