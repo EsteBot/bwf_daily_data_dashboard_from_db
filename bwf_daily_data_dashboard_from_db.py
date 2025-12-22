@@ -2,8 +2,16 @@ import streamlit as st
 import altair as alt
 import pandas as pd
 import sqlite3
-import os
-from datetime import date, timedelta
+import re
+import ast
+from datetime import date, datetime
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.utilities import SQLDatabase
+from langchain_classic.chains import create_sql_query_chain
+from langchain_community.tools import QuerySQLDatabaseTool
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from operator import itemgetter
 
 # --- Configuration ---
 DB_FILE_NAME = "hotel_data.db"
@@ -397,6 +405,142 @@ if not filtered_data.empty:
         mime="text/csv"
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("---") 
+
+    # --- SQL AI Logic ---
+    # Pull the key from st.secrets
+    api_key = st.secrets["GEMINI_API_KEY"]
+
+    llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-lite",
+    google_api_key=api_key, 
+    temperature=0
+    )
+    db = SQLDatabase.from_uri("sqlite:///hotel_data.db")
+
+    def clean_sql(text):
+        """Strips away all conversational filler and markdown, leaving only the SQL."""
+        # 1. Remove markdown blocks
+        text = re.sub(r"```sql", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"```", "", text)
+        # 2. Find the FIRST word 'SELECT' or 'WITH' and keep everything after it
+        # This kills things like "Here is your query: SELECT..."
+        match = re.search(r"(SELECT|WITH).*", text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(0).strip()
+        return text.strip()
+
+    write_query = create_sql_query_chain(llm, db)
+    execute_query = QuerySQLDatabaseTool(db=db)
+    answer_chain = llm | StrOutputParser()
+
+    # --- Master Chain ---
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    hotel_logic = """
+    You are a Hotel Revenue Manager. 
+
+    **CORE FORMULAS:**
+    - Occupancy % = (Rooms Sold / Total Rooms) * 100. (Total Rooms = 60).
+    - ADR (Average Daily Rate) = Total Revenue / Rooms Sold.
+    - RevPAR = Total Revenue / Total Rooms.
+
+    **CRITICAL DATA RULES:**
+    - Today's date is {0}. Use YYYY-MM-DD for dates.
+    - ALWAYS use double quotes for column names like "Rooms Sold".
+
+    **SNAPSHOT HANDLING (The "No Double-Counting" Rule):**
+    - "Arrivals" and "Rooms Sold" are cumulative snapshots.
+    - To get a DAILY TOTAL: Use MAX("Arrivals") for that day. NEVER use SUM().
+    - To get an AVERAGE over time: You must first find the MAX() for each day, then average those daily maximums. 
+    - Example for Average: SELECT AVG(daily_max) FROM (SELECT MAX("Arrivals") as daily_max FROM daily_hourly_metrics GROUP BY date_column).
+    """.format(datetime.now().strftime("%Y-%m-%d"))
+
+    full_chain = (
+    RunnablePassthrough.assign(
+        query=lambda x: clean_sql(write_query.invoke({"question": f"{hotel_logic} Question: {x['question']}"}))
+    ).assign(
+            result=itemgetter("query") | execute_query
+        )
+        | (lambda x: f"Question: {x['question']}\nSQL: {x['query']}\nData: {x['result']}\n\nSummary:")
+        | answer_chain
+    )
+
+    # --- Streamlit UI for AI ---
+    with st.container(border=True):
+        st.title("🦾 Hotel Intelligence Assistant 🛂")
+        st.markdown("#### Ask me about arrivals, occupancy, revenue, or trends!")
+        # This adds a subtle, professional hint
+        st.markdown("""
+            💡 **Graphing Tip:** Ask for a **trend over time** (like a week or a month) 
+            and I'll automatically build a chart for you!""")
+
+        # 1. THE GUIDE: An expander that stays out of the way but is there for help
+        with st.expander("❓ How to ask the best questions"):
+            st.write("""
+            **I know about these metrics:**
+            * **Occupancy %:** How full the hotel is.
+            * **ADR:** The average price guests paid for a room.
+            * **RevPAR:** Our revenue performance across King and QQ rooms.
+            * **Arrivals:** How many guests checked in by hour or date.
+            
+            **Try these formats:**
+            * *"What was the occupancy rate for April 1st?"*
+            * *"Show me the trend of arrivals for the first week of October."*
+            * *"Which day had the highest ADR in May?"*
+            ---
+            **💡 Pro-Tip for Accuracy:**
+            Because this data updates every hour, I am trained to look for the **daily peak** (the highest number) to give you the most accurate totals.
+            """)
+
+        # Clean text input
+        user_input = st.text_input("Enter your question:", placeholder="e.g., Which month and day had the most arrivals?")
+
+        if user_input:
+            with st.spinner("Analyzing..."):
+                # We run the chain manually so we can capture the steps for debugging
+                try:
+                    # Step 1: Generate SQL (Now using the full 'Manager Brain' prompt)
+                    raw_sql = write_query.invoke({"question": f"{hotel_logic} Question: {user_input}"})
+                    sql = clean_sql(raw_sql)
+                    
+                    # Step 2: Run SQL
+                    data_raw = db.run(sql) # This comes out as a string
+                    
+                    # Convert the string "[('2025...', 2)]" into a real Python list
+                    try:
+                        data = ast.literal_eval(data_raw)
+                    except:
+                        data = data_raw # Fallback if it's already a list or plain text
+                    
+                    # Step 3: Get the Final Summary
+                    final_prompt = f"Question: {user_input}\nSQL Used: {sql}\nResult from DB: {data}\n\nProvide a very short 1-sentence answer."
+                    response = llm.invoke(final_prompt)
+                    
+                    # SHOW RESULTS
+                    st.success(response.content)
+
+                    # THE TREND GRAPH: If data has multiple rows, show a chart!
+                    # Note: check if data is a list and has more than 1 entry
+                    if isinstance(data, list) and len(data) > 1:
+                        try:
+                            df = pd.DataFrame(data, columns=["Date", "Value"])
+                            df.set_index("Date", inplace=True)
+                            
+                            with st.expander("📈 Visual Trend Analysis", expanded=True):
+                                st.line_chart(df)
+                        except Exception as chart_err:
+                            # This catches cases where columns aren't Date/Value
+                            pass
+
+                    # DEBUG WINDOW (This is the most important part for you right now!)
+                    with st.expander("🔍 See what happened behind the scenes"):
+                        st.write("**What the AI first wrote:**", raw_sql)
+                        st.code(sql, language="sql")
+                        st.write("**What the Database returned:**", data)
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 
 else:
