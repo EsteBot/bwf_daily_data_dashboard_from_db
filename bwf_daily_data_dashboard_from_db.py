@@ -212,6 +212,7 @@ if not filtered_data.empty:
             return
 
         resampled = resample_data(df_base, freq_map[time_scale])
+        resampled = resampled.sort_index()
         labeled = format_labels(resampled, time_scale)
 
         for col in metric_cols:
@@ -227,7 +228,7 @@ if not filtered_data.empty:
 
         if graph_type == "Bar":
             chart = alt.Chart(melted).mark_bar().encode(
-                x=alt.X('Label:N', title=None),  # ← Removed sort=month_order
+                x=alt.X('Label:N', title=None),
                 xOffset='Rate Type:N',
                 y=alt.Y('Rate:Q', title=y_title),
                 color=alt.Color(
@@ -246,7 +247,7 @@ if not filtered_data.empty:
 
         elif graph_type == "Line":
             base = alt.Chart(labeled).encode(
-                x=alt.X('Label:N', title=None),  # ← Removed sort=month_order
+                x=alt.X('Label:N', title=None),
                 tooltip=['Label'] + metric_cols
             )
 
