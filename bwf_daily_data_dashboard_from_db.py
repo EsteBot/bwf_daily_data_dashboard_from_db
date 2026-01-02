@@ -177,7 +177,7 @@ if not filtered_data.empty:
         elif time_scale == "Week":
             df['Label'] = df.index.strftime('Week of %b %d')
         elif time_scale == "Month":
-            df['Label'] = df.index.strftime('%B')
+            df['Label'] = df.index.strftime('%B %Y')
         return df
 
     def plot_metric_chart(df, metric_col, hour, title, y_title, graph_type, time_scale):
@@ -229,7 +229,7 @@ if not filtered_data.empty:
             month_order = ['January', 'February', 'March', 'April', 'May', 'June',
                'July', 'August', 'September', 'October', 'November', 'December']
             chart = alt.Chart(melted).mark_bar().encode(
-                x=alt.X('Label:N', sort=month_order, title=None),
+                x=alt.X('Label:N', title=None),
                 xOffset='Rate Type:N',
                 y=alt.Y('Rate:Q', title=y_title),
                 color=alt.Color(
@@ -251,7 +251,7 @@ if not filtered_data.empty:
             month_order = ['January', 'February', 'March', 'April', 'May', 'June',
                'July', 'August', 'September', 'October', 'November', 'December']
             base = alt.Chart(labeled).encode(
-                x=alt.X('Label:N', sort=month_order, title=None),
+                x=alt.X('Label:N', title=None),
                 tooltip=['Label'] + metric_cols
             )
 
