@@ -226,32 +226,27 @@ if not filtered_data.empty:
         )
 
         if graph_type == "Bar":
-            month_order = ['January', 'February', 'March', 'April', 'May', 'June',
-               'July', 'August', 'September', 'October', 'November', 'December']
             chart = alt.Chart(melted).mark_bar().encode(
-                x=alt.X('Label:N', title=None),
+                x=alt.X('Label:N', title=None),  # ← Removed sort=month_order
                 xOffset='Rate Type:N',
                 y=alt.Y('Rate:Q', title=y_title),
                 color=alt.Color(
-                'Rate Type:N',
-                scale=alt.Scale(
-                    domain=['King Rate Clean', 'QQ Rate Clean'],
-                    range=['rgb(70, 130, 255)', 'rgb(135, 206, 250)']
+                    'Rate Type:N',
+                    scale=alt.Scale(
+                        domain=['King Rate Clean', 'QQ Rate Clean'],
+                        range=['rgb(70, 130, 255)', 'rgb(135, 206, 250)']
+                    ),
+                    legend=alt.Legend(
+                        title="Rate Type",
+                        labelExpr="replace(datum.label, ' Rate Clean', '')"
+                    )
                 ),
-                legend=alt.Legend(
-                    title="Rate Type",
-                    labelExpr="replace(datum.label, ' Rate Clean', '')"
-                )
-            )
-            ,
                 tooltip=['Label', 'Rate Type', 'Rate']
             ).properties(width=800, height=400)
 
         elif graph_type == "Line":
-            month_order = ['January', 'February', 'March', 'April', 'May', 'June',
-               'July', 'August', 'September', 'October', 'November', 'December']
             base = alt.Chart(labeled).encode(
-                x=alt.X('Label:N', title=None),
+                x=alt.X('Label:N', title=None),  # ← Removed sort=month_order
                 tooltip=['Label'] + metric_cols
             )
 
@@ -270,7 +265,6 @@ if not filtered_data.empty:
 
         st.markdown(f"<h3 style='color:rgb(70, 130, 255); text-align:center;'>{title}</h3>", unsafe_allow_html=True)
         st.altair_chart(chart, use_container_width=True)
-
     # --- Calculate Metrics on the FILTERED Data ---
     occupancy_rate = get_overall_occupancy_rate(DB_FILE_NAME, TABLE_NAME, MAX_HOTEL_CAPACITY, start_date, end_date)
 
