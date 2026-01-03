@@ -218,6 +218,9 @@ if not filtered_data.empty:
         for col in metric_cols:
             labeled[col] = labeled[col].round(1)
 
+        #Create ordered list of labels
+        label_order = labeled['Label'].tolist()
+
         # Reshape for grouped bar chart
         melted = labeled.melt(
             id_vars='Label',
@@ -228,7 +231,7 @@ if not filtered_data.empty:
 
         if graph_type == "Bar":
             chart = alt.Chart(melted).mark_bar().encode(
-                x=alt.X('Label:N', title=None),
+                x=alt.X('Label:N', sort=label_order, title=None),
                 xOffset='Rate Type:N',
                 y=alt.Y('Rate:Q', title=y_title),
                 color=alt.Color(
